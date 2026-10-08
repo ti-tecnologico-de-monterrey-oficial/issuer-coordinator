@@ -56,9 +56,6 @@ jobs:
 
       - name: Ejecutar pruebas con cobertura
         run: npm run test:coverage
-        env:
-          TENANT_TOKEN_PROTECTED_TEST: jds
-          TENANT_TOKEN_PROTECTED_TEST_2: hgf
 
       - name: Verificar reporte LCOV
         shell: bash
