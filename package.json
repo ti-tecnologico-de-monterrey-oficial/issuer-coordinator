@@ -9,8 +9,8 @@
     "dev-noenv": "nodemon server.js",
     "lint": "eslint . --ext .js",
     "lint-fix": "eslint --fix . --ext .js",
-    "test": "NODE_OPTIONS=--experimental-vm-modules npx mocha --timeout 10000 -r dotenv/config dotenv_config_path=src/test-fixtures/.env.testing \"src/**/*.test.js\" ",
-    "test:coverage": "c8 --reporter=lcov --reporter=text --report-dir=coverage npm run test"
+    "test": "node --experimental-vm-modules --env-file=src/test-fixtures/.env.testing ./node_modules/mocha/bin/mocha.js --timeout 10000 \"src/**/*.test.js\" ",
+    "test:coverage": "c8 --check-coverage --lines 90 --functions 90 --branches 90 --statements 90 --reporter=lcov --reporter=text --report-dir=coverage npm run test"
   },
   "dependencies": {
     "axios": "^1.4.0",
