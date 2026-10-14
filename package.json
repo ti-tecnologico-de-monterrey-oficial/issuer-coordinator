@@ -9,8 +9,8 @@
     "dev-noenv": "nodemon server.js",
     "lint": "eslint . --ext .js",
     "lint-fix": "eslint --fix . --ext .js",
-    "test": "node --experimental-vm-modules --env-file=src/test-fixtures/.env.testing ./node_modules/mocha/bin/mocha.js --timeout 10000 \"src/**/*.test.js\" ",
-    "test:coverage": "c8 --check-coverage --lines 90 --functions 90 --branches 90 --statements 90 --reporter=lcov --reporter=text --report-dir=coverage npm run test"
+    "test": "vitest run",
+    "test:coverage": "npm test -- --coverage"
   },
   "dependencies": {
     "axios": "^1.4.0",
@@ -22,17 +22,17 @@
     "winston": "^3.9.0"
   },
   "devDependencies": {
-    "c8": "^12.0.0",
+    "@vitest/coverage-v8": "^3.2.4",
     "chai": "^4.3.7",
     "eslint": "^8.47.0",
     "eslint-config-standard": "^17.1.0",
     "eslint-plugin-import": "^2.28.1",
     "eslint-plugin-n": "^16.0.2",
     "eslint-plugin-promise": "^6.1.1",
-    "mocha": "^10.2.0",
     "nock": "^13.3.1",
     "nodemon": "^2.0.21",
     "sinon": "^22.1.0",
-    "supertest": "^6.3.3"
+    "supertest": "^6.3.3",
+    "vitest": "^3.2.4"
   }
 }

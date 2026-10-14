@@ -8,6 +8,7 @@ on:
       - 'server.js'
       - 'package.json'
       - 'package-lock.json'
+      - 'vitest.config.js'
       - '.eslintrc.cjs'
       - '.github/workflows/ci-issuer-coordinator.yml'
   push:
@@ -17,6 +18,7 @@ on:
       - 'server.js'
       - 'package.json'
       - 'package-lock.json'
+      - 'vitest.config.js'
       - '.eslintrc.cjs'
       - '.github/workflows/ci-issuer-coordinator.yml'
 
@@ -32,7 +34,7 @@ concurrency:
 
 jobs:
   test:
-    name: Mocha con cobertura
+    name: Vitest con cobertura
     runs-on: ubuntu-latest
     timeout-minutes: 20
 
