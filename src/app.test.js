@@ -11,6 +11,7 @@ import unknownStatusListNock from './test-fixtures/nocks/unknown_status_list_noc
 import statusListNock from './test-fixtures/nocks/status_list_nock.js'
 import didWebGeneratorNock from './test-fixtures/nocks/did-web-generator.js'
 import didKeyGeneratorNock from './test-fixtures/nocks/did-key-generator.js'
+import { resetConfig } from './config.js'
 
 import { build } from './app.js'
 
@@ -39,6 +40,7 @@ describe('api', () => {
   })
 
   afterEach(async () => {
+    nock.cleanAll()
     nock.restore()
   })
 
@@ -63,6 +65,17 @@ describe('api', () => {
     }, 10000)
   })
 
+  describe('GET /seedgen', () => {
+    it('forwards seed generation requests to the signing service', async () => {
+      nock('http://localhost:4006').get('/seedgen').reply(200, { seed: 'generated-seed' })
+
+      const response = await request(app).get('/seedgen')
+
+      expect(response.status).to.equal(200)
+      expect(response.body).to.deep.equal({ seed: 'generated-seed' })
+    })
+  })
+
   describe('POST /instance/:instanceId/credentials/issue', () => {
     it('returns 422 if no body', done => {
       request(app)
@@ -70,6 +83,26 @@ describe('api', () => {
         .set('Authorization', `Bearer ${testTenantToken}`)
         .expect('Content-Type', /json/)
         .expect(422, done)
+    })
+
+    it('returns 422 when credential fields have invalid shapes', async () => {
+      const validCredential = getUnsignedVC()
+      const invalidCredentials = [
+        { ...validCredential, '@context': [] },
+        { ...validCredential, '@context': 'not-an-array' },
+        { ...validCredential, '@context': [42] },
+        { ...validCredential, type: [] },
+        { ...validCredential, type: ['VerifiableCredential', 42] },
+        { ...validCredential, issuer: [] },
+        { ...validCredential, credentialSubject: [] }
+      ]
+
+      for (const credential of invalidCredentials) {
+        const response = await request(app)
+          .post('/instance/un_protected_test/credentials/issue')
+          .send(credential)
+        expect(response.status).to.equal(422)
+      }
     })
 
     it('returns 401 if tenant token is missing from auth header', done => {
@@ -89,7 +122,7 @@ describe('api', () => {
 
       expect(response.header['content-type']).to.have.string('json')
       expect(response.status).to.equal(201)
-      expect(response.body)
+      expect(Boolean(response.body.proof)).to.equal(true)
     })
 
     it('returns 403 if token is not valid', done => {
@@ -250,6 +283,70 @@ describe('api', () => {
       const returnedList = JSON.parse(JSON.stringify(response.body))
       // this proof value comes from the nock:
       expect(returnedList.proof.proofValue).to.equal('z4y3GawinQg1aCqbYqZM8dmDpbmtFa3kE6tFefdXvLi5iby25dvmVwLNZrfcFPyhpshrhCWB76pdSZchVve3K1Znr')
+    })
+
+    it('forwards non-404 status service errors to the error handler', async () => {
+      nock('http://localhost:4008').get('/service-error').reply(503, { message: 'maintenance' })
+
+      const response = await request(app).get('/status/service-error')
+
+      expect(response.status).to.equal(500)
+      expect(response.body.serviceResponseStatus).to.equal(503)
+    })
+  })
+
+  describe('when status service is disabled', () => {
+    let previousStatusSetting
+
+    beforeEach(async () => {
+      previousStatusSetting = process.env.ENABLE_STATUS_SERVICE
+      process.env.ENABLE_STATUS_SERVICE = 'false'
+      resetConfig()
+      app = await build()
+    })
+
+    afterEach(() => {
+      if (previousStatusSetting === undefined) delete process.env.ENABLE_STATUS_SERVICE
+      else process.env.ENABLE_STATUS_SERVICE = previousStatusSetting
+      resetConfig()
+    })
+
+    it('reports a healthy coordinator and signer without checking the status service', async () => {
+      nock('http://localhost:4006').get('/').reply(200, 'signer ok')
+
+      const response = await request(app).get('/')
+
+      expect(response.status).to.equal(200)
+      expect(response.body.message).to.equal('issuer issuer-coordinator and signing-service both ok. status-service is disabled.')
+    })
+
+    it('rejects status updates with 405', async () => {
+      const response = await request(app)
+        .post('/instance/un_protected_test/credentials/status')
+        .send(statusUpdateBody)
+
+      expect(response.status).to.equal(405)
+    })
+
+    it('rejects status list requests with 405 when status service is disabled', async () => {
+      const response = await request(app).get('/status/list-id')
+
+      expect(response.status).to.equal(405)
+      expect(response.body.message).to.equal('The status service has not been enabled.')
+    })
+
+    it('issues valid credentials directly through the signer without allocating status', async () => {
+      const signingServiceCall = nock('http://localhost:4006')
+        .post('/instance/un_protected_test/credentials/sign')
+        .reply(200, { proof: { type: 'Ed25519Signature2020' } })
+
+      const response = await request(app)
+        .post('/instance/un_protected_test/credentials/issue')
+        .send({ credential: getUnsignedVC() })
+
+      expect(response.status).to.equal(201)
+      expect(response.body.proof.type).to.equal('Ed25519Signature2020')
+      expect(signingServiceCall.isDone()).to.equal(true)
     })
   })
 
