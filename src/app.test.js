@@ -9,6 +9,7 @@ import unprotectedStatusUpdateNock from './test-fixtures/nocks/unprotected_statu
 import unknownStatusIdNock from './test-fixtures/nocks/unknown_status_id_nock.js'
 import protectedStatusUpdateNock from './test-fixtures/nocks/protected_status_update.js'
 import statusListNock from './test-fixtures/nocks/status_list_nock.js'
+import unknownStatusListNock from './test-fixtures/nocks/unknown_status_list_nock.js'
 import didWebGeneratorNock from './test-fixtures/nocks/did-web-generator.js'
 import didKeyGeneratorNock from './test-fixtures/nocks/did-key-generator.js'
 import { resetConfig } from './config.js'
@@ -54,6 +55,53 @@ describe('api', () => {
         .expect(200)
         .expect('Content-Type', /json/)
         .expect(/{"message":"issuer-coordinator, status-service, and signing-service all ok."}/)
+    })
+
+    it('reports 500 when the status service is down', async () => {
+      nock('http://localhost:4008').get('/').replyWithError('connect ECONNREFUSED')
+
+      const response = await request(app).get('/')
+
+      expect(response.status).to.equal(500)
+      expect(response.body.message).to.equal('status service is NOT running.')
+    })
+
+    it('reports 500 when the signing service is down', async () => {
+      nock('http://localhost:4008').get('/').reply(200, 'status-service server status: ok.')
+      nock('http://localhost:4006').get('/').replyWithError('connect ECONNREFUSED')
+
+      const response = await request(app).get('/')
+
+      expect(response.status).to.equal(500)
+      expect(response.body.message).to.equal('signing service is NOT running.')
+    })
+  })
+
+  describe('signing service proxies when the signer is down', () => {
+    it('GET /seedgen forwards the failure to the error handler', async () => {
+      nock('http://localhost:4006').get('/seedgen').replyWithError('connect ECONNREFUSED')
+
+      const response = await request(app).get('/seedgen')
+
+      expect(response.status).to.equal(500)
+      expect(response.body.message).to.have.string("didn't respond")
+    })
+
+    it('GET /did-key-generator forwards the failure to the error handler', async () => {
+      nock('http://localhost:4006').get('/did-key-generator').reply(503, { message: 'unavailable' })
+
+      const response = await request(app).get('/did-key-generator')
+
+      expect(response.status).to.equal(500)
+      expect(response.body.serviceResponseStatus).to.equal(503)
+    })
+
+    it('POST /did-web-generator forwards the failure to the error handler', async () => {
+      nock('http://localhost:4006').post('/did-web-generator').replyWithError('connect ECONNREFUSED')
+
+      const response = await request(app).post('/did-web-generator').send({ url: 'https://example.edu' })
+
+      expect(response.status).to.equal(500)
     })
   })
 
@@ -103,6 +151,36 @@ describe('api', () => {
           .send(credential)
         expect(response.status).to.equal(422)
       }
+    })
+
+    it('accepts inline JSON-LD contexts next to context URLs', async () => {
+      const inlineContext = { '@version': 1.1, tec: 'https://tec.mx/credentials#' }
+      const credential = getUnsignedVC()
+      credential['@context'] = [...credential['@context'], inlineContext]
+      nock('http://localhost:4008')
+        .post('/credentials/status/allocate')
+        .reply(200, (uri, body) => body)
+      nock('http://localhost:4006')
+        .post('/instance/un_protected_test/credentials/sign')
+        .reply(200, (uri, body) => ({ ...body, proof: { type: 'Ed25519Signature2020' } }))
+
+      const response = await request(app)
+        .post('/instance/un_protected_test/credentials/issue')
+        .send(credential)
+
+      expect(response.status).to.equal(201)
+      expect(response.body['@context']).to.deep.include(inlineContext)
+    })
+
+    it('returns 422 when a context item is null', async () => {
+      const credential = getUnsignedVC()
+      credential['@context'] = [...credential['@context'], null]
+
+      const response = await request(app)
+        .post('/instance/un_protected_test/credentials/issue')
+        .send(credential)
+
+      expect(response.status).to.equal(422)
     })
 
     it('returns 401 if tenant token is missing from auth header', async () => {
@@ -276,6 +354,24 @@ describe('api', () => {
       // this proof value comes from the nock:
       expect(returnedList.proof.proofValue).to.equal('z4y3GawinQg1aCqbYqZM8dmDpbmtFa3kE6tFefdXvLi5iby25dvmVwLNZrfcFPyhpshrhCWB76pdSZchVve3K1Znr')
     })
+
+    it('returns 404 when the status service does not know the id', async () => {
+      unknownStatusListNock()
+
+      const response = await request(app).get('/status/9898u')
+
+      expect(response.status).to.equal(404)
+      expect(response.body.message).to.equal('No status credential found for that id.')
+    })
+
+    it('returns 500 when the status service does not respond', async () => {
+      nock('http://localhost:4008').get('/slAwJe6GGR6mBojlGW5U').replyWithError('connect ECONNREFUSED')
+
+      const response = await request(app).get('/status/slAwJe6GGR6mBojlGW5U')
+
+      expect(response.status).to.equal(500)
+      expect(response.body.message).to.have.string("didn't respond")
+    })
   })
 
   describe('when status service is disabled', () => {
@@ -309,6 +405,13 @@ describe('api', () => {
         .send(statusUpdateBody)
 
       expect(response.status).to.equal(405)
+    })
+
+    it('rejects status list lookups with 405', async () => {
+      const response = await request(app).get('/status/slAwJe6GGR6mBojlGW5U')
+
+      expect(response.status).to.equal(405)
+      expect(response.body.message).to.equal('The status service has not been enabled.')
     })
 
     it('issues valid credentials directly through the signer without allocating status', async () => {

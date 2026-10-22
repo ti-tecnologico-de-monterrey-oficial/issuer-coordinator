@@ -26,9 +26,17 @@ function isArrayOfStrings (arrayToCheck) {
   return (arrayToCheck != null) && Array.isArray(arrayToCheck) && arrayToCheck.length && arrayToCheck.every(item => { return (item && typeof item === 'string') })
 }
 
+// Además de URLs, @context admite contextos inline: el Issuer de
+// tec-credentials envía el contexto del Tec como objeto JSON-LD.
+function isValidContextArray (arrayToCheck) {
+  return Array.isArray(arrayToCheck) &&
+    arrayToCheck.length > 0 &&
+    arrayToCheck.every(item => item && (typeof item === 'string' || typeof item === 'object'))
+}
+
 function isValidVC (unSignedVC) {
   if (!unSignedVC) return false
-  const isContextPropertyValid = isArrayOfStrings(unSignedVC['@context'])
+  const isContextPropertyValid = isValidContextArray(unSignedVC['@context'])
   const isTypePropertyValid = isArrayOfStrings(unSignedVC.type)
   const isIssuerPropertyValid = (unSignedVC.issuer != null) && !Array.isArray(unSignedVC.issuer) && (typeof unSignedVC.issuer === 'string' || typeof unSignedVC.issuer === 'object')
   const isCredentialSubjectPropertyValid = (unSignedVC.credentialSubject != null) && !Array.isArray(unSignedVC.credentialSubject) && (typeof unSignedVC.credentialSubject === 'object')
@@ -54,7 +62,7 @@ export async function build (opts = {}) {
       try {
         await axios.get(`http://${statusService}/`)
       } catch (e) {
-        next({
+        return next({
           message: 'status service is NOT running.',
           error: e,
           code: 500
@@ -64,7 +72,7 @@ export async function build (opts = {}) {
     try {
       await axios.get(`http://${signingService}/`)
     } catch (e) {
-      next({
+      return next({
         message: 'signing service is NOT running.',
         error: e,
         code: 500
@@ -79,19 +87,31 @@ export async function build (opts = {}) {
   })
 
   app.get('/seedgen', async (req, res, next) => {
-    const response = await axios.get(`http://${signingService}/seedgen`)
-    return res.json(response.data)
+    try {
+      const response = await axios.get(`http://${signingService}/seedgen`)
+      return res.json(response.data)
+    } catch (error) {
+      next(error)
+    }
   })
 
   app.get('/did-key-generator', async (req, res, next) => {
-    const response = await axios.get(`http://${signingService}/did-key-generator`)
-    return res.json(response.data)
+    try {
+      const response = await axios.get(`http://${signingService}/did-key-generator`)
+      return res.json(response.data)
+    } catch (error) {
+      next(error)
+    }
   })
 
   app.post('/did-web-generator', async (req, res, next) => {
-    const body = req.body
-    const response = await axios.post(`http://${signingService}/did-web-generator`, body)
-    return res.json(response.data)
+    try {
+      const body = req.body
+      const response = await axios.post(`http://${signingService}/did-web-generator`, body)
+      return res.json(response.data)
+    } catch (error) {
+      next(error)
+    }
   })
 
   app.post('/instance/:tenantName/credentials/issue',
@@ -139,7 +159,7 @@ export async function build (opts = {}) {
         if (error.response?.status === 404) {
           // if it is a 404 then just forward on the error
           // we got from the service
-          next(error.response.data)
+          return next(error.response.data)
         }
         // otherwise, forward the error to middleware:
         next(error)
@@ -147,19 +167,17 @@ export async function build (opts = {}) {
     })
 
   app.get('/status/:statusCredentialId', async function (req, res, next) {
-    if (!enableStatusService) next({ code: 405, message: 'The status service has not been enabled.' })
+    if (!enableStatusService) return next({ code: 405, message: 'The status service has not been enabled.' })
     const statusCredentialId = req.params.statusCredentialId
     try {
       const { data: statusCredential } = await axios.get(`http://${statusService}/${statusCredentialId}`)
       return res.status(200).json(statusCredential)
     } catch (error) {
-      if (error.response.status === 404) {
-        next({ code: 404, message: 'No status credential found for that id.' })
-      } else {
-        next(error)
+      if (error.response?.status === 404) {
+        return next({ code: 404, message: 'No status credential found for that id.' })
       }
+      next(error)
     }
-    return res.status(500).send({ message: 'Server error.' })
   })
 
   // Attach the error handling middleware calls, in order they should run
