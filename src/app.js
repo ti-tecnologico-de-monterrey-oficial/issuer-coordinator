@@ -103,16 +103,6 @@ export async function build (opts = {}) {
     }
   })
 
-  app.post('/did-web-generator', async (req, res, next) => {
-    try {
-      // signing solo lee url; no se reenvía nada más de la petición.
-      const response = await axios.post(`http://${signingService}/did-web-generator`, { url: req.body?.url })
-      return res.json(response.data)
-    } catch (error) {
-      next(error)
-    }
-  })
-
   app.post('/instance/:tenantName/credentials/issue',
     async (req, res, next) => {
       try {
