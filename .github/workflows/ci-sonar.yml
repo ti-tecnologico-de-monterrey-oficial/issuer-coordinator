@@ -11,7 +11,7 @@ on:
       - 'package.json'
       - 'package-lock.json'
       - 'vitest.config.js'
-      - '.eslintrc.cjs'
+      - 'eslint.config.js'
       - 'sonar-project.properties'
       - '.github/workflows/ci-sonar.yml'
 
@@ -23,7 +23,7 @@ on:
       - 'package.json'
       - 'package-lock.json'
       - 'vitest.config.js'
-      - '.eslintrc.cjs'
+      - 'eslint.config.js'
       - 'sonar-project.properties'
       - '.github/workflows/ci-sonar.yml'
 

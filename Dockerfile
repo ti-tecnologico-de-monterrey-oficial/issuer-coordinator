@@ -9,7 +9,7 @@
 # de variables de entorno en el arranque, así que la misma imagen sirve para
 # cualquier ambiente y no hay --build-arg que pasar.
 
-FROM node:22-alpine AS deps
+FROM node:24-alpine AS deps
 
 WORKDIR /app
 
@@ -24,7 +24,7 @@ COPY package.json package-lock.json ./
 # arbitrario durante la instalación.
 RUN npm ci --omit=dev --ignore-scripts
 
-FROM node:22-alpine AS runtime
+FROM node:24-alpine AS runtime
 
 # tini como PID 1: reenvía SIGTERM al proceso de Node cuando Container Apps
 # retira una revisión —Node no lo atiende por sí solo siendo PID 1— y recoge

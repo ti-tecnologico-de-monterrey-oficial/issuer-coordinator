@@ -9,7 +9,7 @@ on:
       - 'package.json'
       - 'package-lock.json'
       - 'vitest.config.js'
-      - '.eslintrc.cjs'
+      - 'eslint.config.js'
       - '.github/workflows/ci-issuer-coordinator.yml'
   push:
     branches: [develop, release, main]
@@ -19,7 +19,7 @@ on:
       - 'package.json'
       - 'package-lock.json'
       - 'vitest.config.js'
-      - '.eslintrc.cjs'
+      - 'eslint.config.js'
       - '.github/workflows/ci-issuer-coordinator.yml'
 
 permissions:

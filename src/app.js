@@ -35,7 +35,6 @@ function isValidContextArray (arrayToCheck) {
 }
 
 function isValidVC (unSignedVC) {
-  if (!unSignedVC) return false
   const isContextPropertyValid = isValidContextArray(unSignedVC['@context'])
   const isTypePropertyValid = isArrayOfStrings(unSignedVC.type)
   const isIssuerPropertyValid = (unSignedVC.issuer != null) && !Array.isArray(unSignedVC.issuer) && (typeof unSignedVC.issuer === 'string' || typeof unSignedVC.issuer === 'object')
@@ -119,7 +118,8 @@ export async function build (opts = {}) {
       try {
         const tenantName = req.params.tenantName // the issuer instance/tenant with which to sign
         const authHeader = req.headers.authorization
-        const body = req.body
+        // Express 5 deja req.body en undefined cuando la petición no trae cuerpo.
+        const body = req.body ?? {}
         const unSignedVC = body.credential ? body.credential : body
         await verifyAuthHeader(authHeader, tenantName)
         // NOTE: we throw the error here which will then be caught by middleware errorhandler

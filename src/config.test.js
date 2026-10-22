@@ -1,4 +1,4 @@
-import { expect } from 'chai'
+import { expect } from 'vitest'
 import { getConfig, getTenantToken, resetConfig } from './config.js'
 
 const configKeys = [

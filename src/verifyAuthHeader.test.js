@@ -1,4 +1,4 @@
-import { expect } from 'chai'
+import { expect } from 'vitest'
 import verifyAuthHeader from './verifyAuthHeader.js'
 
 describe('verifyAuthHeader', () => {

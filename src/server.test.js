@@ -1,7 +1,6 @@
-import http from 'http'
-import https from 'https'
-import { expect } from 'chai'
-import { afterEach, beforeEach, vi } from 'vitest'
+import http from 'node:http'
+import https from 'node:https'
+import { afterEach, beforeEach, expect, vi } from 'vitest'
 import { resetConfig } from './config.js'
 import { createServer, start } from './server.js'
 

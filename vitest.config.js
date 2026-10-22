@@ -1,6 +1,4 @@
-import dotenv from 'dotenv'
-
-dotenv.config({ path: 'src/test-fixtures/.env.testing' })
+process.loadEnvFile('src/test-fixtures/.env.testing')
 
 export default {
   test: {

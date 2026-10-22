@@ -551,7 +551,7 @@ npm run dev
 
 ### Testing
 
-Testing uses `supertest`, `mocha`, and `nock` to test the endpoints. To run tests:
+Testing uses `vitest`, `supertest`, and `nock` to test the endpoints. To run tests:
 
 ```bash
 npm run test

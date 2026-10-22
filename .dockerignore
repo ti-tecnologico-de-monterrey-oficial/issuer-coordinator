@@ -28,7 +28,7 @@ images
 LICENSE
 
 # Herramientas de desarrollo
-.eslintrc.cjs
+eslint.config.js
 vitest.config.js
 sonar-project.properties
 .eslintcache
