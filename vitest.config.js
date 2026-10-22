@@ -1,0 +1,22 @@
+import dotenv from 'dotenv'
+
+dotenv.config({ path: 'src/test-fixtures/.env.testing' })
+
+export default {
+  test: {
+    globals: true,
+    testTimeout: 10000,
+    coverage: {
+      provider: 'v8',
+      reporter: ['text', 'lcov'],
+      include: ['src/**/*.js'],
+      exclude: ['src/**/*.test.js', 'src/test-fixtures/**'],
+      thresholds: {
+        lines: 90,
+        functions: 90,
+        branches: 90,
+        statements: 90
+      }
+    }
+  }
+}
