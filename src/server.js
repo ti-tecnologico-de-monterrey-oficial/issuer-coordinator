@@ -1,6 +1,6 @@
-import https from 'https'
-import http from 'http'
-import fs from 'fs'
+import https from 'node:https'
+import http from 'node:http'
+import fs from 'node:fs'
 import { build } from './app.js'
 import { getConfig, initializeConfig } from './config.js'
 import logger from './utils/logger.js'
@@ -17,7 +17,7 @@ export function createServer (app, enableHttpsForDev) {
 }
 
 export async function start () {
-  await initializeConfig()
+  initializeConfig()
   const { port, enableHttpsForDev } = getConfig()
 
   const app = await build()
