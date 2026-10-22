@@ -58,6 +58,16 @@ export function resetConfig () {
   CONFIG = null
 }
 
+// Devuelve el nombre del tenant tal como está configurado, o null si no
+// existe. Las URLs a los otros servicios se arman con este valor y no con el
+// que llega en la ruta.
+export function findTenantName (tenantName) {
+  if (!Object.keys(TENANT_ACCESS_TOKENS).length) {
+    parseTenantTokens()
+  }
+  return Object.keys(TENANT_ACCESS_TOKENS).find(name => name === tenantName) ?? null
+}
+
 export function getTenantToken (tenantName) {
   if (!Object.keys(TENANT_ACCESS_TOKENS).length) {
     parseTenantTokens()

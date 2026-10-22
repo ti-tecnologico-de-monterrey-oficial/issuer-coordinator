@@ -1,12 +1,13 @@
 import express from 'express'
-import cors from 'cors'
 import axios from 'axios'
 import accessLogger from './middleware/accessLogger.js'
 import errorHandler from './middleware/errorHandler.js'
 import errorLogger from './middleware/errorLogger.js'
 import invalidPathHandler from './middleware/invalidPathHandler.js'
 import verifyAuthHeader from './verifyAuthHeader.js'
-import { getConfig } from './config.js'
+import { findTenantName, getConfig } from './config.js'
+
+const STATUS_CREDENTIAL_ID = /^[A-Za-z0-9_-]+$/
 
 class IssuingException extends Error {
   constructor (code, message, error = null) {
@@ -54,7 +55,6 @@ export async function build (opts = {}) {
   app.use(accessLogger())
   app.use(express.json())
   app.use(express.urlencoded({ extended: false }))
-  app.use(cors())
 
   app.get('/', async function (req, res, next) {
     if (enableStatusService) {
@@ -105,8 +105,8 @@ export async function build (opts = {}) {
 
   app.post('/did-web-generator', async (req, res, next) => {
     try {
-      const body = req.body
-      const response = await axios.post(`http://${signingService}/did-web-generator`, body)
+      // signing solo lee url; no se reenvía nada más de la petición.
+      const response = await axios.post(`http://${signingService}/did-web-generator`, { url: req.body?.url })
       return res.json(response.data)
     } catch (error) {
       next(error)
@@ -116,7 +116,7 @@ export async function build (opts = {}) {
   app.post('/instance/:tenantName/credentials/issue',
     async (req, res, next) => {
       try {
-        const tenantName = req.params.tenantName // the issuer instance/tenant with which to sign
+        const tenantName = findTenantName(req.params.tenantName) // the issuer instance/tenant with which to sign
         const authHeader = req.headers.authorization
         // Express 5 deja req.body en undefined cuando la petición no trae cuerpo.
         const body = req.body ?? {}
@@ -147,7 +147,7 @@ export async function build (opts = {}) {
     async (req, res, next) => {
       if (!enableStatusService) return res.status(405).send('The status service has not been enabled.')
       try {
-        const tenantName = req.params.tenantName // the issuer instance/tenant with which to sign
+        const tenantName = findTenantName(req.params.tenantName) // the issuer instance/tenant with which to sign
         const authHeader = req.headers.authorization
         const statusUpdate = req.body
         await verifyAuthHeader(authHeader, tenantName)
@@ -169,8 +169,12 @@ export async function build (opts = {}) {
   app.get('/status/:statusCredentialId', async function (req, res, next) {
     if (!enableStatusService) return next({ code: 405, message: 'The status service has not been enabled.' })
     const statusCredentialId = req.params.statusCredentialId
+    // Los ids de lista son alfanuméricos; cualquier otro valor no existe.
+    if (!STATUS_CREDENTIAL_ID.test(statusCredentialId)) {
+      return next({ code: 404, message: 'No status credential found for that id.' })
+    }
     try {
-      const { data: statusCredential } = await axios.get(`http://${statusService}/${statusCredentialId}`)
+      const { data: statusCredential } = await axios.get(`http://${statusService}/${encodeURIComponent(statusCredentialId)}`)
       return res.status(200).json(statusCredential)
     } catch (error) {
       if (error.response?.status === 404) {

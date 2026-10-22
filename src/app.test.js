@@ -357,6 +357,13 @@ describe('api', () => {
       expect(returnedList.proof.proofValue).to.equal('z4y3GawinQg1aCqbYqZM8dmDpbmtFa3kE6tFefdXvLi5iby25dvmVwLNZrfcFPyhpshrhCWB76pdSZchVve3K1Znr')
     })
 
+    it('returns 404 without calling the status service when the id has unsafe characters', async () => {
+      const response = await request(app).get('/status/..%2Fcredentials%2Fstatus')
+
+      expect(response.status).to.equal(404)
+      expect(response.body.message).to.equal('No status credential found for that id.')
+    })
+
     it('returns 404 when the status service does not know the id', async () => {
       unknownStatusListNock()
 
