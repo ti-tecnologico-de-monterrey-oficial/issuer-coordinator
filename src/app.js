@@ -5,7 +5,7 @@ import errorHandler from './middleware/errorHandler.js'
 import errorLogger from './middleware/errorLogger.js'
 import invalidPathHandler from './middleware/invalidPathHandler.js'
 import verifyAuthHeader from './verifyAuthHeader.js'
-import { findTenantName, getConfig } from './config.js'
+import { findTenantName, getConfig, getSigningEndpoint } from './config.js'
 
 const STATUS_CREDENTIAL_ID = /^[A-Za-z0-9_-]+$/
 
@@ -18,8 +18,8 @@ class IssuingException extends Error {
   }
 }
 
-async function callService (endpoint, body) {
-  const { data } = await axios.post(endpoint, body)
+async function callService (url, body) {
+  const { data } = await axios.post(url, body)
   return data
 }
 
@@ -117,7 +117,7 @@ export async function build (opts = {}) {
         const vcWithStatus = enableStatusService
           ? await callService(`http://${statusService}/credentials/status/allocate`, unSignedVC)
           : unSignedVC
-        const signedVC = await callService(`http://${signingService}/instance/${tenantName}/credentials/sign`, vcWithStatus)
+        const signedVC = await callService(getSigningEndpoint(tenantName), vcWithStatus)
         return res.status(201).json(signedVC)
       } catch (error) {
         // have to catch async errors and forward error handling
