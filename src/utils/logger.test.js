@@ -1,5 +1,4 @@
-import { expect } from 'chai'
-import { afterEach, vi } from 'vitest'
+import { afterEach, expect, vi } from 'vitest'
 
 // El nivel se calcula al importar el módulo, así que cada caso lo vuelve a
 // cargar con NODE_ENV ya fijado.

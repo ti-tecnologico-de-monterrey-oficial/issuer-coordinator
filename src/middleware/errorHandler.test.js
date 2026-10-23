@@ -1,6 +1,5 @@
-import { expect } from 'chai'
+import { expect, vi } from 'vitest'
 import { AxiosError } from 'axios'
-import sinon from 'sinon'
 import errorHandler from './errorHandler.js'
 
 describe('errorHandler', () => {
@@ -8,12 +7,10 @@ describe('errorHandler', () => {
 
   beforeEach(() => {
     response = {
-      header: sinon.stub(),
-      status: sinon.stub(),
-      json: sinon.stub()
+      header: vi.fn(() => response),
+      status: vi.fn(() => response),
+      json: vi.fn()
     }
-    response.header.returns(response)
-    response.status.returns(response)
   })
 
   it('serializes downstream service response errors', () => {
@@ -25,8 +22,8 @@ describe('errorHandler', () => {
 
     errorHandler(error, {}, response)
 
-    expect(response.status.calledWith(500)).to.equal(true)
-    expect(response.json.firstCall.args[0]).to.include({
+    expect(response.status).toHaveBeenCalledWith(500)
+    expect(response.json.mock.calls[0][0]).to.include({
       code: 500,
       serviceResponseError: error.response.data,
       serviceResponseStatus: 502,
@@ -37,7 +34,7 @@ describe('errorHandler', () => {
   it('reports a downstream service request that did not receive a response', () => {
     const error = new AxiosError('timeout', 'ECONNABORTED', {}, {})
     errorHandler(error, {}, response)
-    expect(response.json.firstCall.args[0]).to.include({
+    expect(response.json.mock.calls[0][0]).to.include({
       code: 500,
       message: "One of the internal microservices didn't respond. Hit / to check heartbeats."
     })
@@ -46,7 +43,7 @@ describe('errorHandler', () => {
   it('reports errors that occur before a request is formulated', () => {
     const error = new AxiosError('invalid endpoint')
     errorHandler(error, {}, response)
-    expect(response.json.firstCall.args[0]).to.include({
+    expect(response.json.mock.calls[0][0]).to.include({
       code: 500,
       message: 'Likely an error when setting up the request that prevented the request from being formulated: invalid endpoint',
       error
@@ -56,8 +53,22 @@ describe('errorHandler', () => {
   it('passes application errors through unchanged', () => {
     const error = { code: 422, message: 'Invalid credential' }
     errorHandler(error, {}, response)
-    expect(response.header.calledWith('Content-Type', 'application/json')).to.equal(true)
-    expect(response.status.calledWith(422)).to.equal(true)
-    expect(response.json.calledWith(error)).to.equal(true)
+    expect(response.header).toHaveBeenCalledWith('Content-Type', 'application/json')
+    expect(response.status).toHaveBeenCalledWith(422)
+    expect(response.json).toHaveBeenCalledWith(error)
+  })
+
+  it('responds with 500 when the error has no valid HTTP code', () => {
+    const error = new TypeError('boom')
+    errorHandler(error, {}, response)
+    expect(response.status).toHaveBeenCalledWith(500)
+    expect(response.json).toHaveBeenCalledWith({ message: 'boom' })
+  })
+
+  it('keeps the message of thrown Error instances', () => {
+    const error = Object.assign(new Error('A valid verifiable credential must be provided'), { code: 422 })
+    errorHandler(error, {}, response)
+    expect(response.status).toHaveBeenCalledWith(422)
+    expect(response.json).toHaveBeenCalledWith({ code: 422, message: 'A valid verifiable credential must be provided' })
   })
 })

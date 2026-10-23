@@ -3,36 +3,31 @@
   "version": "1.0.0",
   "private": true,
   "type": "module",
+  "engines": {
+    "node": ">=24"
+  },
   "scripts": {
-    "start": "node -r dotenv/config server.js",
-    "dev": "nodemon -r dotenv/config server.js",
-    "dev-noenv": "nodemon server.js",
-    "lint": "eslint . --ext .js",
-    "lint-fix": "eslint --fix . --ext .js",
+    "start": "node --env-file-if-exists=.env server.js",
+    "dev": "node --watch --env-file-if-exists=.env server.js",
+    "dev-noenv": "node --watch server.js",
+    "lint": "eslint .",
+    "lint-fix": "eslint --fix .",
     "test": "vitest run",
     "test:coverage": "npm test -- --coverage"
   },
   "dependencies": {
-    "axios": "^1.4.0",
-    "cors": "^2.8.5",
-    "debug": "~2.6.9",
-    "dotenv": "^16.0.3",
-    "express": "~4.16.1",
-    "morgan": "~1.9.1",
-    "winston": "^3.9.0"
+    "axios": "^1.20.0",
+    "cors": "^2.8.6",
+    "express": "^5.3.0",
+    "morgan": "^1.12.1",
+    "winston": "^3.19.0"
   },
   "devDependencies": {
-    "@vitest/coverage-v8": "^3.2.4",
-    "chai": "^4.3.7",
-    "eslint": "^8.47.0",
-    "eslint-config-standard": "^17.1.0",
-    "eslint-plugin-import": "^2.28.1",
-    "eslint-plugin-n": "^16.0.2",
-    "eslint-plugin-promise": "^6.1.1",
-    "nock": "^13.3.1",
-    "nodemon": "^2.0.21",
-    "sinon": "^22.1.0",
-    "supertest": "^6.3.3",
-    "vitest": "^3.2.4"
+    "@vitest/coverage-v8": "^5.0.5",
+    "eslint": "^10.13.0",
+    "neostandard": "^0.14.1",
+    "nock": "^14.0.17",
+    "supertest": "^7.3.1",
+    "vitest": "^5.0.5"
   }
 }

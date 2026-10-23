@@ -1,7 +1,6 @@
-import { expect } from 'chai'
+import { expect, vi } from 'vitest'
 import express from 'express'
 import request from 'supertest'
-import sinon from 'sinon'
 import logger from '../utils/logger.js'
 import { resetConfig } from '../config.js'
 import accessLogger from './accessLogger.js'
@@ -11,7 +10,7 @@ describe('accessLogger', () => {
     const previousSetting = process.env.ENABLE_ACCESS_LOGGING
     process.env.ENABLE_ACCESS_LOGGING = 'true'
     resetConfig()
-    const logStub = sinon.stub(logger, 'http')
+    const logStub = vi.spyOn(logger, 'http').mockImplementation(() => {})
 
     try {
       const app = express()
@@ -21,10 +20,10 @@ describe('accessLogger', () => {
       const response = await request(app).get('/').expect(200)
 
       expect(response.text).to.equal('ok')
-      expect(logStub.calledOnce).to.equal(true)
-      expect(logStub.firstCall.args[0]).to.contain('GET / 200')
+      expect(logStub).toHaveBeenCalledOnce()
+      expect(logStub.mock.calls[0][0]).to.contain('GET / 200')
     } finally {
-      sinon.restore()
+      vi.restoreAllMocks()
       if (previousSetting === undefined) delete process.env.ENABLE_ACCESS_LOGGING
       else process.env.ENABLE_ACCESS_LOGGING = previousSetting
       resetConfig()

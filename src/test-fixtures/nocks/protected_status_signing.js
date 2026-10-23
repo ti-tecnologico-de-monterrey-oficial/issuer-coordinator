@@ -176,16 +176,10 @@ export default () => {
       '*',
       'Content-Type',
       'application/json; charset=utf-8',
-      'Content-Length',
-      '1470',
       'ETag',
       'W/"5be-fsduSOAlXIbTnkhg3Eo5U7uNYRQ"',
       'Date',
       'Wed, 23 Aug 2023 12:44:15 GMT',
-      'Connection',
-      'keep-alive',
-      'Keep-Alive',
-      'timeout=5'
     ])
 
   nock('http://localhost:4006', { encodedQueryParams: true })
@@ -197,16 +191,10 @@ export default () => {
       '*',
       'Content-Type',
       'application/json; charset=utf-8',
-      'Content-Length',
-      '1810',
       'ETag',
       'W/"712-sK9DFAzLeARFlwoONQJ3mkiGzeU"',
       'Date',
       'Wed, 23 Aug 2023 12:44:15 GMT',
-      'Connection',
-      'keep-alive',
-      'Keep-Alive',
-      'timeout=5'
     ])
 
   /* nock('http://127.0.0.1:55225', { encodedQueryParams: true })
@@ -218,13 +206,9 @@ export default () => {
       '*',
       'Content-Type',
       'application/json; charset=utf-8',
-      'Content-Length',
-      '1810',
       'ETag',
       'W/"712-fUBsd5PM46QPKrivsShMP8gvwtc"',
       'Date',
       'Tue, 22 Aug 2023 20:11:09 GMT',
-      'Connection',
-      'close'
   ]) */
 }

@@ -23,11 +23,17 @@ const errorHandler = (error, request, response, next) => {
     errorResponse = handleAxiosError(error)
   } else {
     // otherwise, this is an error that we've thrown ourselves,
-    // or it is some other error, so pass it along
-    errorResponse = error
+    // or it is some other error, so pass it along. message se copia aparte:
+    // en las instancias de Error no es enumerable y JSON lo omitiría.
+    errorResponse = { ...error, message: error.message }
   }
+  // Un error sin code HTTP válido (por ejemplo, un TypeError) se responde
+  // como 500: Express 5 rechaza res.status() con un código fuera de rango.
+  const status = Number.isInteger(errorResponse.code) && errorResponse.code >= 400 && errorResponse.code < 600
+    ? errorResponse.code
+    : 500
   response.header('Content-Type', 'application/json')
-  response.status(errorResponse.code).json(errorResponse)
+  response.status(status).json(errorResponse)
 }
 
 export default errorHandler

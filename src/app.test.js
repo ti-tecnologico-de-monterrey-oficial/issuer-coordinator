@@ -1,5 +1,5 @@
 import nock from 'nock'
-import { expect } from 'chai'
+import { expect } from 'vitest'
 import request from 'supertest'
 import { afterAll, beforeAll } from 'vitest'
 import { getUnsignedVC } from './test-fixtures/vc.js'
@@ -126,11 +126,13 @@ describe('api', () => {
 
   describe('POST /instance/:instanceId/credentials/issue', () => {
     it('returns 422 if no body', async () => {
-      await request(app)
+      const response = await request(app)
         .post('/instance/protected_test/credentials/issue')
         .set('Authorization', `Bearer ${testTenantToken}`)
         .expect('Content-Type', /json/)
         .expect(422)
+
+      expect(response.body.message).to.equal('A valid verifiable credential must be provided')
     })
 
     it('returns 422 when credential fields have invalid shapes', async () => {
