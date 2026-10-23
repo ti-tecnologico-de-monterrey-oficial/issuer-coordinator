@@ -18,8 +18,12 @@ class IssuingException extends Error {
   }
 }
 
+// El cuerpo viaja ya serializado: el JSON que llega en la petición se reenvía
+// como texto y axios no interpreta ninguna de sus propiedades.
 async function callService (url, body) {
-  const { data } = await axios.post(url, body)
+  const { data } = await axios.post(url, JSON.stringify(body), {
+    headers: { 'Content-Type': 'application/json' }
+  })
   return data
 }
 
