@@ -1,5 +1,5 @@
 import { expect } from 'vitest'
-import { getConfig, getTenantToken, resetConfig } from './config.js'
+import { getConfig, getSigningEndpoint, getTenantToken, resetConfig } from './config.js'
 
 const configKeys = [
   'ENABLE_HTTPS_FOR_DEV',
@@ -75,5 +75,13 @@ describe('configuration', () => {
     expect(getTenantToken('test')).to.equal('UNPROTECTED')
     expect(getTenantToken('protected_test')).to.equal(process.env.TENANT_TOKEN_PROTECTED_TEST)
     expect(getTenantToken('tenant-that-does-not-exist')).to.equal(null)
+  })
+
+  it('builds the signing url of configured tenants and returns null for unknown ones', () => {
+    withEnv({ SIGNING_SERVICE: 'signer:5001' }, () => {
+      expect(getSigningEndpoint('protected_test')).to.equal('http://signer:5001/instance/protected_test/credentials/sign')
+      expect(getSigningEndpoint('tenant-that-does-not-exist')).to.equal(null)
+      expect(getSigningEndpoint('../seedgen')).to.equal(null)
+    })
   })
 })

@@ -42,7 +42,7 @@ function parseConfig () {
     enableStatusService: env.ENABLE_STATUS_SERVICE?.toLowerCase() === 'true',
     signingService: env.SIGNING_SERVICE ?? defaultSigningService,
     statusService: env.STATUS_SERVICE ?? defaultStatusService,
-    port: env.PORT ? parseInt(env.PORT) : defaultPort
+    port: env.PORT ? Number.parseInt(env.PORT) : defaultPort
   })
   return config
 }
@@ -58,23 +58,28 @@ export function resetConfig () {
   CONFIG = null
 }
 
-// Devuelve el nombre del tenant tal como está configurado, o null si no
-// existe. Las URLs a los otros servicios se arman con este valor y no con el
-// que llega en la ruta.
-export function findTenantName (tenantName) {
+function tenantNames () {
   if (!Object.keys(TENANT_ACCESS_TOKENS).length) {
     parseTenantTokens()
   }
-  return Object.keys(TENANT_ACCESS_TOKENS).find(name => name === tenantName) ?? null
+  return Object.keys(TENANT_ACCESS_TOKENS)
+}
+
+// Devuelve el nombre del tenant tal como está configurado, o null si no
+// existe.
+export function findTenantName (tenantName) {
+  return tenantNames().find(name => name === tenantName) ?? null
+}
+
+// URL del signing-service para el tenant, o null si no existe. Las URLs salen
+// de la configuración; el nombre que llega en la ruta solo elige una entrada.
+export function getSigningEndpoint (tenantName) {
+  const { signingService } = getConfig()
+  const endpoints = new Map(tenantNames().map(name =>
+    [name, `http://${signingService}/instance/${name}/credentials/sign`]))
+  return endpoints.get(tenantName) ?? null
 }
 
 export function getTenantToken (tenantName) {
-  if (!Object.keys(TENANT_ACCESS_TOKENS).length) {
-    parseTenantTokens()
-  }
-  if (Object.hasOwn(TENANT_ACCESS_TOKENS, tenantName)) {
-    return TENANT_ACCESS_TOKENS[tenantName]
-  } else {
-    return null
-  }
+  return tenantNames().includes(tenantName) ? TENANT_ACCESS_TOKENS[tenantName] : null
 }
