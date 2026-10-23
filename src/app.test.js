@@ -10,7 +10,6 @@ import unknownStatusIdNock from './test-fixtures/nocks/unknown_status_id_nock.js
 import protectedStatusUpdateNock from './test-fixtures/nocks/protected_status_update.js'
 import statusListNock from './test-fixtures/nocks/status_list_nock.js'
 import unknownStatusListNock from './test-fixtures/nocks/unknown_status_list_nock.js'
-import didWebGeneratorNock from './test-fixtures/nocks/did-web-generator.js'
 import didKeyGeneratorNock from './test-fixtures/nocks/did-key-generator.js'
 import { resetConfig } from './config.js'
 
@@ -94,14 +93,6 @@ describe('api', () => {
 
       expect(response.status).to.equal(500)
       expect(response.body.serviceResponseStatus).to.equal(503)
-    })
-
-    it('POST /did-web-generator forwards the failure to the error handler', async () => {
-      nock('http://localhost:4006').post('/did-web-generator').replyWithError('connect ECONNREFUSED')
-
-      const response = await request(app).post('/did-web-generator').send({ url: 'https://example.edu' })
-
-      expect(response.status).to.equal(500)
     })
   })
 
@@ -357,6 +348,13 @@ describe('api', () => {
       expect(returnedList.proof.proofValue).to.equal('z4y3GawinQg1aCqbYqZM8dmDpbmtFa3kE6tFefdXvLi5iby25dvmVwLNZrfcFPyhpshrhCWB76pdSZchVve3K1Znr')
     })
 
+    it('returns 404 without calling the status service when the id has unsafe characters', async () => {
+      const response = await request(app).get('/status/..%2Fcredentials%2Fstatus')
+
+      expect(response.status).to.equal(404)
+      expect(response.body.message).to.equal('No status credential found for that id.')
+    })
+
     it('returns 404 when the status service does not know the id', async () => {
       unknownStatusListNock()
 
@@ -431,27 +429,12 @@ describe('api', () => {
     })
   })
 
-  describe('/did-web-generator', () => {
-    it('returns a new did:web', async () => {
-      didWebGeneratorNock()
-      await request(app)
-        .post('/did-web-generator')
-        .send({
-          url: 'https://raw.githubusercontent.com/jchartrand/didWebTest/main'
-        })
-        .expect('Content-Type', /json/)
-        .expect((res) => {
-          // eslint-disable-next-line
-          expect(res.body.seed).to.exist
-          expect(res.body.didDocument.id).to.eql(
-            'did:web:raw.githubusercontent.com:jchartrand:didWebTest:main'
-          )
-          expect(res.body.did).to.eql(
-            'did:web:raw.githubusercontent.com:jchartrand:didWebTest:main'
-          )
-        })
-        .expect(200)
-    })
+  it('does not proxy /did-web-generator; it is only available on the signing service', async () => {
+    const response = await request(app)
+      .post('/did-web-generator')
+      .send({ url: 'https://example.edu' })
+
+    expect(response.status).to.equal(404)
   })
 
   describe('/did-key-generator', () => {

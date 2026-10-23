@@ -1,5 +1,6 @@
 import { isAxiosError } from 'axios'
 import logger from '../utils/logger.js'
+import sanitizeForLog from '../utils/sanitizeForLog.js'
 
 const errorLogger = (error, request, response, next) => {
   const logEntry = {}
@@ -24,7 +25,7 @@ const errorLogger = (error, request, response, next) => {
     logEntry.message = error.message || 'An unknown error occurred.'
   }
 
-  const errorLogMessage = `Error for route: ${request.originalUrl} - ${request.method} - IP: ${request.ip}`
+  const errorLogMessage = sanitizeForLog(`Error for route: ${request.originalUrl} - ${request.method} - IP: ${request.ip}`)
 
   // note that the logEntry here is what Winston calls a 'meta' object and it simply
   // output to the log as provided, as JSON in this case.
