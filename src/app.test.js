@@ -152,10 +152,10 @@ describe('api', () => {
       credential['@context'] = [...credential['@context'], inlineContext]
       nock('http://localhost:4008')
         .post('/credentials/status/allocate')
-        .reply(200, (uri, body) => body)
+        .reply(200, async (request) => request.json())
       nock('http://localhost:4006')
         .post('/instance/un_protected_test/credentials/sign')
-        .reply(200, (uri, body) => ({ ...body, proof: { type: 'Ed25519Signature2020' } }))
+        .reply(200, async (request) => ({ ...(await request.json()), proof: { type: 'Ed25519Signature2020' } }))
 
       const response = await request(app)
         .post('/instance/un_protected_test/credentials/issue')
