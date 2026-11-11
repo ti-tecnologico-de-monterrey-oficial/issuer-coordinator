@@ -10,15 +10,9 @@ export default () => {
       '*',
       'Content-Type',
       'application/json; charset=utf-8',
-      'Content-Length',
-      '1776',
       'ETag',
       'W/"6f0-JdoCppKv4nbnXnQDbZJxlFrXG7o"',
       'Date',
       'Mon, 09 Sep 2024 18:06:31 GMT',
-      'Connection',
-      'keep-alive',
-      'Keep-Alive',
-      'timeout=5'
     ])
 }

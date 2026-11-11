@@ -1,16 +1,17 @@
 import nock from 'nock'
-import { expect } from 'chai'
+import { expect } from 'vitest'
 import request from 'supertest'
+import { afterAll, beforeAll } from 'vitest'
 import { getUnsignedVC } from './test-fixtures/vc.js'
 import unprotectedNock from './test-fixtures/nocks/unprotected_status_signing.js'
 import protectedNock from './test-fixtures/nocks/protected_status_signing.js'
 import unprotectedStatusUpdateNock from './test-fixtures/nocks/unprotected_status_update.js'
 import unknownStatusIdNock from './test-fixtures/nocks/unknown_status_id_nock.js'
 import protectedStatusUpdateNock from './test-fixtures/nocks/protected_status_update.js'
-import unknownStatusListNock from './test-fixtures/nocks/unknown_status_list_nock.js'
 import statusListNock from './test-fixtures/nocks/status_list_nock.js'
-import didWebGeneratorNock from './test-fixtures/nocks/did-web-generator.js'
+import unknownStatusListNock from './test-fixtures/nocks/unknown_status_list_nock.js'
 import didKeyGeneratorNock from './test-fixtures/nocks/did-key-generator.js'
+import { resetConfig } from './config.js'
 
 import { build } from './app.js'
 
@@ -21,7 +22,7 @@ let statusUpdateBody
 let app
 
 describe('api', () => {
-  before(async () => {
+  beforeAll(async () => {
     testTenantToken = process.env.TENANT_TOKEN_PROTECTED_TEST
     testTenantToken2 = process.env.TENANT_TOKEN_PROTECTED_TEST_2
     statusUpdateBody = {
@@ -30,7 +31,7 @@ describe('api', () => {
     }
   })
 
-  after(() => {
+  afterAll(() => {
   })
 
   beforeEach(async () => {
@@ -39,45 +40,148 @@ describe('api', () => {
   })
 
   afterEach(async () => {
+    nock.cleanAll()
     nock.restore()
   })
 
   describe('GET /', () => {
-    it('GET / => hello', done => {
+    it('GET / => hello', async () => {
       nock('http://localhost:4006').get('/').reply(200, 'signing-service server status: ok.')
       nock('http://localhost:4008').get('/').reply(200, 'status-service server status: ok.')
 
-      request(app)
+      await request(app)
         .get('/')
         .expect(200)
         .expect('Content-Type', /json/)
-        .expect(/{"message":"issuer-coordinator, status-service, and signing-service all ok."}/, done)
+        .expect(/{"message":"issuer-coordinator, status-service, and signing-service all ok."}/)
+    })
+
+    it('reports 500 when the status service is down', async () => {
+      nock('http://localhost:4008').get('/').replyWithError('connect ECONNREFUSED')
+
+      const response = await request(app).get('/')
+
+      expect(response.status).to.equal(500)
+      expect(response.body.message).to.equal('status service is NOT running.')
+    })
+
+    it('reports 500 when the signing service is down', async () => {
+      nock('http://localhost:4008').get('/').reply(200, 'status-service server status: ok.')
+      nock('http://localhost:4006').get('/').replyWithError('connect ECONNREFUSED')
+
+      const response = await request(app).get('/')
+
+      expect(response.status).to.equal(500)
+      expect(response.body.message).to.equal('signing service is NOT running.')
+    })
+  })
+
+  describe('signing service proxies when the signer is down', () => {
+    it('GET /seedgen forwards the failure to the error handler', async () => {
+      nock('http://localhost:4006').get('/seedgen').replyWithError('connect ECONNREFUSED')
+
+      const response = await request(app).get('/seedgen')
+
+      expect(response.status).to.equal(500)
+      expect(response.body.message).to.have.string("didn't respond")
+    })
+
+    it('GET /did-key-generator forwards the failure to the error handler', async () => {
+      nock('http://localhost:4006').get('/did-key-generator').reply(503, { message: 'unavailable' })
+
+      const response = await request(app).get('/did-key-generator')
+
+      expect(response.status).to.equal(500)
+      expect(response.body.serviceResponseStatus).to.equal(503)
     })
   })
 
   describe('GET /unknown', () => {
-    it('unknown endpoint returns 404', done => {
-      request(app)
+    it('unknown endpoint returns 404', async () => {
+      await request(app)
         .get('/unknown')
-        .expect(404, done)
-    }, 10000)
+        .expect(404)
+    })
+  })
+
+  describe('GET /seedgen', () => {
+    it('forwards seed generation requests to the signing service', async () => {
+      nock('http://localhost:4006').get('/seedgen').reply(200, { seed: 'generated-seed' })
+
+      const response = await request(app).get('/seedgen')
+
+      expect(response.status).to.equal(200)
+      expect(response.body).to.deep.equal({ seed: 'generated-seed' })
+    })
   })
 
   describe('POST /instance/:instanceId/credentials/issue', () => {
-    it('returns 422 if no body', done => {
-      request(app)
+    it('returns 422 if no body', async () => {
+      const response = await request(app)
         .post('/instance/protected_test/credentials/issue')
         .set('Authorization', `Bearer ${testTenantToken}`)
         .expect('Content-Type', /json/)
-        .expect(422, done)
+        .expect(422)
+
+      expect(response.body.message).to.equal('A valid verifiable credential must be provided')
     })
 
-    it('returns 401 if tenant token is missing from auth header', done => {
-      request(app)
+    it('returns 422 when credential fields have invalid shapes', async () => {
+      const validCredential = getUnsignedVC()
+      const invalidCredentials = [
+        { ...validCredential, '@context': [] },
+        { ...validCredential, '@context': 'not-an-array' },
+        { ...validCredential, '@context': [42] },
+        { ...validCredential, type: [] },
+        { ...validCredential, type: ['VerifiableCredential', 42] },
+        { ...validCredential, issuer: [] },
+        { ...validCredential, credentialSubject: [] }
+      ]
+
+      for (const credential of invalidCredentials) {
+        const response = await request(app)
+          .post('/instance/un_protected_test/credentials/issue')
+          .send(credential)
+        expect(response.status).to.equal(422)
+      }
+    })
+
+    it('accepts inline JSON-LD contexts next to context URLs', async () => {
+      const inlineContext = { '@version': 1.1, tec: 'https://tec.mx/credentials#' }
+      const credential = getUnsignedVC()
+      credential['@context'] = [...credential['@context'], inlineContext]
+      nock('http://localhost:4008')
+        .post('/credentials/status/allocate')
+        .reply(200, async (request) => request.json())
+      nock('http://localhost:4006')
+        .post('/instance/un_protected_test/credentials/sign')
+        .reply(200, async (request) => ({ ...(await request.json()), proof: { type: 'Ed25519Signature2020' } }))
+
+      const response = await request(app)
+        .post('/instance/un_protected_test/credentials/issue')
+        .send(credential)
+
+      expect(response.status).to.equal(201)
+      expect(response.body['@context']).to.deep.include(inlineContext)
+    })
+
+    it('returns 422 when a context item is null', async () => {
+      const credential = getUnsignedVC()
+      credential['@context'] = [...credential['@context'], null]
+
+      const response = await request(app)
+        .post('/instance/un_protected_test/credentials/issue')
+        .send(credential)
+
+      expect(response.status).to.equal(422)
+    })
+
+    it('returns 401 if tenant token is missing from auth header', async () => {
+      await request(app)
         .post('/instance/protected_test/credentials/issue')
         .send(getUnsignedVC())
         .expect('Content-Type', /json/)
-        .expect(401, done)
+        .expect(401)
     })
 
     it('issues credential for unprotected tenant', async () => {
@@ -89,42 +193,42 @@ describe('api', () => {
 
       expect(response.header['content-type']).to.have.string('json')
       expect(response.status).to.equal(201)
-      expect(response.body)
+      expect(Boolean(response.body.proof)).to.equal(true)
     })
 
-    it('returns 403 if token is not valid', done => {
-      request(app)
+    it('returns 403 if token is not valid', async () => {
+      await request(app)
         .post('/instance/protected_test/credentials/issue')
         .set('Authorization', 'Bearer badToken')
         .send(getUnsignedVC())
         .expect('Content-Type', /json/)
-        .expect(403, done)
+        .expect(403)
     })
 
-    it('returns 403 when trying to use token for a different tenant', done => {
-      request(app)
+    it('returns 403 when trying to use token for a different tenant', async () => {
+      await request(app)
         .post('/instance/protected_test/credentials/issue')
         .set('Authorization', `Bearer ${testTenantToken2}`)
         .send(getUnsignedVC())
         .expect('Content-Type', /json/)
-        .expect(403, done)
+        .expect(403)
     })
 
-    it('returns 401 if token is not marked as Bearer', done => {
-      request(app)
+    it('returns 401 if token is not marked as Bearer', async () => {
+      await request(app)
         .post('/instance/protected_test/credentials/issue')
         .set('Authorization', `${testTenantToken}`)
         .send(getUnsignedVC())
         .expect('Content-Type', /json/)
-        .expect(401, done)
+        .expect(401)
     })
 
-    it('returns 404 if no seed for tenant name', done => {
-      request(app)
+    it('returns 404 if no seed for tenant name', async () => {
+      await request(app)
         .post('/instance/wrongTenantName/credentials/issue')
         .set('Authorization', `${testTenantToken}`)
         .send(getUnsignedVC())
-        .expect(404, done)
+        .expect(404)
         .expect('Content-Type', /json/)
     })
 
@@ -146,65 +250,65 @@ describe('api', () => {
   })
 
   describe('POST /instance/:instanceId/credentials/status', () => {
-    it('returns 400 if no body', done => {
-      request(app)
+    it('returns 400 if no body', async () => {
+      await request(app)
         .post('/instance/un_protected_test/credentials/status')
         .set('Authorization', `Bearer ${testTenantToken}`)
         .expect('Content-Type', /json/)
-        .expect(400, done)
+        .expect(400)
     })
 
-    it('returns 401 if tenant token is missing from auth header', done => {
-      request(app)
+    it('returns 401 if tenant token is missing from auth header', async () => {
+      await request(app)
         .post('/instance/protected_test/credentials/status')
         .send(statusUpdateBody)
         .expect('Content-Type', /json/)
-        .expect(401, done)
+        .expect(401)
     })
 
-    it('update unprotected status when token not set for tenant in config', done => {
+    it('update unprotected status when token not set for tenant in config', async () => {
       unprotectedStatusUpdateNock()
-      request(app)
+      await request(app)
         .post('/instance/un_protected_test/credentials/status')
         .send(statusUpdateBody)
         .expect('Content-Type', /json/)
-        .expect(200, done)
+        .expect(200)
     })
 
-    it('returns 403 if token is not valid', done => {
-      request(app)
+    it('returns 403 if token is not valid', async () => {
+      await request(app)
         .post('/instance/protected_test/credentials/status')
         .set('Authorization', 'Bearer ThisIsABadToken')
         .send(statusUpdateBody)
         .expect('Content-Type', /json/)
-        .expect(403, done)
+        .expect(403)
     })
 
-    it('returns 401 if token is not marked as Bearer', done => {
-      request(app)
+    it('returns 401 if token is not marked as Bearer', async () => {
+      await request(app)
         .post('/instance/protected_test/credentials/status')
         .set('Authorization', `${testTenantToken}`)
         .send(statusUpdateBody)
         .expect('Content-Type', /json/)
-        .expect(401, done)
+        .expect(401)
     })
 
-    it('returns 404 if no seed for tenant name', done => {
-      request(app)
+    it('returns 404 if no seed for tenant name', async () => {
+      await request(app)
         .post('/instance/wrongTenantName/credentials/status')
         .set('Authorization', `${testTenantToken}`)
         .send(statusUpdateBody)
-        .expect(404, done)
+        .expect(404)
         .expect('Content-Type', /json/)
     })
 
-    it('returns 403 when trying to use token for a different tenant', done => {
-      request(app)
+    it('returns 403 when trying to use token for a different tenant', async () => {
+      await request(app)
         .post('/instance/protected_test/credentials/status')
         .set('Authorization', `Bearer ${testTenantToken2}`)
         .send(statusUpdateBody)
         .expect('Content-Type', /json/)
-        .expect(403, done)
+        .expect(403)
     })
 
     it('returns 404 for unknown cred id', async () => {
@@ -233,14 +337,6 @@ describe('api', () => {
   })
 
   describe('GET /status/:statusCredentialId', () => {
-    it('returns 404 for unknown status credential id', async () => {
-      unknownStatusListNock()
-      const response = await request(app)
-        .get('/status/9898u')
-      expect(response.header['content-type']).to.have.string('json')
-      expect(response.status).to.equal(404)
-    })
-
     it('returns credential status list from status service', async () => {
       statusListNock()
       const response = await request(app)
@@ -251,29 +347,94 @@ describe('api', () => {
       // this proof value comes from the nock:
       expect(returnedList.proof.proofValue).to.equal('z4y3GawinQg1aCqbYqZM8dmDpbmtFa3kE6tFefdXvLi5iby25dvmVwLNZrfcFPyhpshrhCWB76pdSZchVve3K1Znr')
     })
+
+    it('returns 404 without calling the status service when the id has unsafe characters', async () => {
+      const response = await request(app).get('/status/..%2Fcredentials%2Fstatus')
+
+      expect(response.status).to.equal(404)
+      expect(response.body.message).to.equal('No status credential found for that id.')
+    })
+
+    it('returns 404 when the status service does not know the id', async () => {
+      unknownStatusListNock()
+
+      const response = await request(app).get('/status/9898u')
+
+      expect(response.status).to.equal(404)
+      expect(response.body.message).to.equal('No status credential found for that id.')
+    })
+
+    it('returns 500 when the status service does not respond', async () => {
+      nock('http://localhost:4008').get('/slAwJe6GGR6mBojlGW5U').replyWithError('connect ECONNREFUSED')
+
+      const response = await request(app).get('/status/slAwJe6GGR6mBojlGW5U')
+
+      expect(response.status).to.equal(500)
+      expect(response.body.message).to.have.string("didn't respond")
+    })
   })
 
-  describe('/did-web-generator', () => {
-    it('returns a new did:web', async () => {
-      didWebGeneratorNock()
-      await request(app)
-        .post('/did-web-generator')
-        .send({
-          url: 'https://raw.githubusercontent.com/jchartrand/didWebTest/main'
-        })
-        .expect('Content-Type', /json/)
-        .expect((res) => {
-          // eslint-disable-next-line
-          expect(res.body.seed).to.exist
-          expect(res.body.didDocument.id).to.eql(
-            'did:web:raw.githubusercontent.com:jchartrand:didWebTest:main'
-          )
-          expect(res.body.did).to.eql(
-            'did:web:raw.githubusercontent.com:jchartrand:didWebTest:main'
-          )
-        })
-        .expect(200)
+  describe('when status service is disabled', () => {
+    let previousStatusSetting
+
+    beforeEach(async () => {
+      previousStatusSetting = process.env.ENABLE_STATUS_SERVICE
+      process.env.ENABLE_STATUS_SERVICE = 'false'
+      resetConfig()
+      app = await build()
     })
+
+    afterEach(() => {
+      if (previousStatusSetting === undefined) delete process.env.ENABLE_STATUS_SERVICE
+      else process.env.ENABLE_STATUS_SERVICE = previousStatusSetting
+      resetConfig()
+    })
+
+    it('reports a healthy coordinator and signer without checking the status service', async () => {
+      nock('http://localhost:4006').get('/').reply(200, 'signer ok')
+
+      const response = await request(app).get('/')
+
+      expect(response.status).to.equal(200)
+      expect(response.body.message).to.equal('issuer issuer-coordinator and signing-service both ok. status-service is disabled.')
+    })
+
+    it('rejects status updates with 405', async () => {
+      const response = await request(app)
+        .post('/instance/un_protected_test/credentials/status')
+        .send(statusUpdateBody)
+
+      expect(response.status).to.equal(405)
+    })
+
+    it('rejects status list lookups with 405', async () => {
+      const response = await request(app).get('/status/slAwJe6GGR6mBojlGW5U')
+
+      expect(response.status).to.equal(405)
+      expect(response.body.message).to.equal('The status service has not been enabled.')
+    })
+
+    it('issues valid credentials directly through the signer without allocating status', async () => {
+      const signingServiceCall = nock('http://localhost:4006')
+        .post('/instance/un_protected_test/credentials/sign')
+        .reply(200, { proof: { type: 'Ed25519Signature2020' } })
+
+      const response = await request(app)
+        .post('/instance/un_protected_test/credentials/issue')
+        .send({ credential: getUnsignedVC() })
+
+      expect(response.status).to.equal(201)
+      expect(response.body.proof.type).to.equal('Ed25519Signature2020')
+      expect(signingServiceCall.isDone()).to.equal(true)
+    })
+  })
+
+  it('does not proxy /did-web-generator; it is only available on the signing service', async () => {
+    const response = await request(app)
+      .post('/did-web-generator')
+      .send({ url: 'https://example.edu' })
+
+    expect(response.status).to.equal(404)
   })
 
   describe('/did-key-generator', () => {

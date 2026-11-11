@@ -176,16 +176,10 @@ export default () => {
       '*',
       'Content-Type',
       'application/json; charset=utf-8',
-      'Content-Length',
-      '1810',
       'ETag',
       'W/"712-fUBsd5PM46QPKrivsShMP8gvwtc"',
       'Date',
       'Tue, 22 Aug 2023 20:11:09 GMT',
-      'Connection',
-      'keep-alive',
-      'Keep-Alive',
-      'timeout=5'
     ])
   nock('http://localhost:4008', { encodedQueryParams: true })
     .post('/credentials/status/allocate', unsignedVcWithoutStatus)
@@ -196,16 +190,10 @@ export default () => {
       '*',
       'Content-Type',
       'application/json; charset=utf-8',
-      'Content-Length',
-      '1470',
       'ETag',
       'W/"5be-fsduSOAlXIbTnkhg3Eo5U7uNYRQ"',
       'Date',
       'Tue, 22 Aug 2023 20:11:09 GMT',
-      'Connection',
-      'keep-alive',
-      'Keep-Alive',
-      'timeout=5'
     ])
 
   /* nock('http://127.0.0.1:55225', { encodedQueryParams: true })
@@ -217,14 +205,10 @@ export default () => {
       '*',
       'Content-Type',
       'application/json; charset=utf-8',
-      'Content-Length',
-      '1810',
       'ETag',
       'W/"712-fUBsd5PM46QPKrivsShMP8gvwtc"',
       'Date',
       'Tue, 22 Aug 2023 20:11:09 GMT',
-      'Connection',
-      'close'
   ]) */
 }
 
@@ -238,15 +222,9 @@ export default () => {
     '*',
     'Content-Type',
     'application/json; charset=utf-8',
-    'Content-Length',
-    '1810',
     'ETag',
     'W/"712-0nL+TtiN38hiHrSNvQHR9Iqira4"',
     'Date',
     'Thu, 03 Aug 2023 17:27:29 GMT',
-    'Connection',
-    'keep-alive',
-    'Keep-Alive',
-    'timeout=5'
   ])
 } */
