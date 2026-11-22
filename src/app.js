@@ -1,12 +1,13 @@
 import express from 'express'
-import cors from 'cors'
 import axios from 'axios'
 import accessLogger from './middleware/accessLogger.js'
 import errorHandler from './middleware/errorHandler.js'
 import errorLogger from './middleware/errorLogger.js'
 import invalidPathHandler from './middleware/invalidPathHandler.js'
 import verifyAuthHeader from './verifyAuthHeader.js'
-import { getConfig } from './config.js'
+import { findTenantName, getConfig, getSigningEndpoint } from './config.js'
+
+const STATUS_CREDENTIAL_ID = /^[A-Za-z0-9_-]+$/
 
 class IssuingException extends Error {
   constructor (code, message, error = null) {
@@ -17,8 +18,12 @@ class IssuingException extends Error {
   }
 }
 
-async function callService (endpoint, body) {
-  const { data } = await axios.post(endpoint, body)
+// El cuerpo viaja ya serializado: el JSON que llega en la petición se reenvía
+// como texto y axios no interpreta ninguna de sus propiedades.
+async function callService (url, body) {
+  const { data } = await axios.post(url, JSON.stringify(body), {
+    headers: { 'Content-Type': 'application/json' }
+  })
   return data
 }
 
@@ -26,9 +31,16 @@ function isArrayOfStrings (arrayToCheck) {
   return (arrayToCheck != null) && Array.isArray(arrayToCheck) && arrayToCheck.length && arrayToCheck.every(item => { return (item && typeof item === 'string') })
 }
 
+// Además de URLs, @context admite contextos inline: el Issuer de
+// tec-credentials envía el contexto del Tec como objeto JSON-LD.
+function isValidContextArray (arrayToCheck) {
+  return Array.isArray(arrayToCheck) &&
+    arrayToCheck.length > 0 &&
+    arrayToCheck.every(item => item && (typeof item === 'string' || typeof item === 'object'))
+}
+
 function isValidVC (unSignedVC) {
-  if (!unSignedVC) return false
-  const isContextPropertyValid = isArrayOfStrings(unSignedVC['@context'])
+  const isContextPropertyValid = isValidContextArray(unSignedVC['@context'])
   const isTypePropertyValid = isArrayOfStrings(unSignedVC.type)
   const isIssuerPropertyValid = (unSignedVC.issuer != null) && !Array.isArray(unSignedVC.issuer) && (typeof unSignedVC.issuer === 'string' || typeof unSignedVC.issuer === 'object')
   const isCredentialSubjectPropertyValid = (unSignedVC.credentialSubject != null) && !Array.isArray(unSignedVC.credentialSubject) && (typeof unSignedVC.credentialSubject === 'object')
@@ -47,14 +59,13 @@ export async function build (opts = {}) {
   app.use(accessLogger())
   app.use(express.json())
   app.use(express.urlencoded({ extended: false }))
-  app.use(cors())
 
   app.get('/', async function (req, res, next) {
     if (enableStatusService) {
       try {
         await axios.get(`http://${statusService}/`)
       } catch (e) {
-        next({
+        return next({
           message: 'status service is NOT running.',
           error: e,
           code: 500
@@ -64,7 +75,7 @@ export async function build (opts = {}) {
     try {
       await axios.get(`http://${signingService}/`)
     } catch (e) {
-      next({
+      return next({
         message: 'signing service is NOT running.',
         error: e,
         code: 500
@@ -79,27 +90,30 @@ export async function build (opts = {}) {
   })
 
   app.get('/seedgen', async (req, res, next) => {
-    const response = await axios.get(`http://${signingService}/seedgen`)
-    return res.json(response.data)
+    try {
+      const response = await axios.get(`http://${signingService}/seedgen`)
+      return res.json(response.data)
+    } catch (error) {
+      next(error)
+    }
   })
 
   app.get('/did-key-generator', async (req, res, next) => {
-    const response = await axios.get(`http://${signingService}/did-key-generator`)
-    return res.json(response.data)
-  })
-
-  app.post('/did-web-generator', async (req, res, next) => {
-    const body = req.body
-    const response = await axios.post(`http://${signingService}/did-web-generator`, body)
-    return res.json(response.data)
+    try {
+      const response = await axios.get(`http://${signingService}/did-key-generator`)
+      return res.json(response.data)
+    } catch (error) {
+      next(error)
+    }
   })
 
   app.post('/instance/:tenantName/credentials/issue',
     async (req, res, next) => {
       try {
-        const tenantName = req.params.tenantName // the issuer instance/tenant with which to sign
+        const tenantName = findTenantName(req.params.tenantName) // the issuer instance/tenant with which to sign
         const authHeader = req.headers.authorization
-        const body = req.body
+        // Express 5 deja req.body en undefined cuando la petición no trae cuerpo.
+        const body = req.body ?? {}
         const unSignedVC = body.credential ? body.credential : body
         await verifyAuthHeader(authHeader, tenantName)
         // NOTE: we throw the error here which will then be caught by middleware errorhandler
@@ -107,7 +121,7 @@ export async function build (opts = {}) {
         const vcWithStatus = enableStatusService
           ? await callService(`http://${statusService}/credentials/status/allocate`, unSignedVC)
           : unSignedVC
-        const signedVC = await callService(`http://${signingService}/instance/${tenantName}/credentials/sign`, vcWithStatus)
+        const signedVC = await callService(getSigningEndpoint(tenantName), vcWithStatus)
         return res.status(201).json(signedVC)
       } catch (error) {
         // have to catch async errors and forward error handling
@@ -127,7 +141,7 @@ export async function build (opts = {}) {
     async (req, res, next) => {
       if (!enableStatusService) return res.status(405).send('The status service has not been enabled.')
       try {
-        const tenantName = req.params.tenantName // the issuer instance/tenant with which to sign
+        const tenantName = findTenantName(req.params.tenantName) // the issuer instance/tenant with which to sign
         const authHeader = req.headers.authorization
         const statusUpdate = req.body
         await verifyAuthHeader(authHeader, tenantName)
@@ -139,7 +153,7 @@ export async function build (opts = {}) {
         if (error.response?.status === 404) {
           // if it is a 404 then just forward on the error
           // we got from the service
-          next(error.response.data)
+          return next(error.response.data)
         }
         // otherwise, forward the error to middleware:
         next(error)
@@ -147,19 +161,21 @@ export async function build (opts = {}) {
     })
 
   app.get('/status/:statusCredentialId', async function (req, res, next) {
-    if (!enableStatusService) next({ code: 405, message: 'The status service has not been enabled.' })
+    if (!enableStatusService) return next({ code: 405, message: 'The status service has not been enabled.' })
     const statusCredentialId = req.params.statusCredentialId
+    // Los ids de lista son alfanuméricos; cualquier otro valor no existe.
+    if (!STATUS_CREDENTIAL_ID.test(statusCredentialId)) {
+      return next({ code: 404, message: 'No status credential found for that id.' })
+    }
     try {
-      const { data: statusCredential } = await axios.get(`http://${statusService}/${statusCredentialId}`)
+      const { data: statusCredential } = await axios.get(`http://${statusService}/${encodeURIComponent(statusCredentialId)}`)
       return res.status(200).json(statusCredential)
     } catch (error) {
-      if (error.response.status === 404) {
-        next({ code: 404, message: 'No status credential found for that id.' })
-      } else {
-        next(error)
+      if (error.response?.status === 404) {
+        return next({ code: 404, message: 'No status credential found for that id.' })
       }
+      next(error)
     }
-    return res.status(500).send({ message: 'Server error.' })
   })
 
   // Attach the error handling middleware calls, in order they should run

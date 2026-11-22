@@ -13,15 +13,9 @@ export default () => {
       '*',
       'Content-Type',
       'text/html; charset=utf-8',
-      'Content-Length',
-      '38',
       'ETag',
       'W/"26-5PplkKqVB9H6fTLVTOo/weOUkgE"',
       'Date',
       'Wed, 23 Aug 2023 13:01:55 GMT',
-      'Connection',
-      'keep-alive',
-      'Keep-Alive',
-      'timeout=5'
     ])
 }
