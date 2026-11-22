@@ -18,7 +18,7 @@ export default async function verifyAuthHeader (authHeader, tenantName) {
   }
   const [scheme, accessToken] = authHeader.split(' ')
 
-  if (!(scheme === 'Bearer')) {
+  if (scheme !== 'Bearer') {
     throw new AuthorizationException(401, 'Access header must be of type Bearer.')
   }
 

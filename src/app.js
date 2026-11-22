@@ -1,13 +1,14 @@
 import express from 'express'
-import cors from 'cors'
 import axios from 'axios'
 import accessLogger from './middleware/accessLogger.js'
 import errorHandler from './middleware/errorHandler.js'
 import errorLogger from './middleware/errorLogger.js'
 import invalidPathHandler from './middleware/invalidPathHandler.js'
 import verifyAuthHeader from './verifyAuthHeader.js'
-import { getConfig } from './config.js'
+import { findTenantName, getConfig, getSigningEndpoint } from './config.js'
 import { operationId, trace, credentialTrace, traceEnabled } from './utils/statusTrace.js'
+
+const STATUS_CREDENTIAL_ID = /^[A-Za-z0-9_-]+$/
 
 class IssuingException extends Error {
   constructor (code, message, error = null) {
@@ -18,32 +19,56 @@ class IssuingException extends Error {
   }
 }
 
-async function callService (endpoint, body, id) {
-  const { data } = await axios.post(endpoint, body, { headers: { 'x-operation-id': id } })
+// El cuerpo viaja serializado y se propaga el OperationId.
+async function callService (url, body, id) {
+  const { data } = await axios.post(url, JSON.stringify(body), {
+    headers: {
+      'Content-Type': 'application/json',
+      'x-operation-id': id
+    }
+  })
+
   return data
-}
-
-function isValidContextItem (item) {
-  return item && (typeof item === 'string' || typeof item === 'object')
-}
-
-function isValidContextArray (arrayToCheck) {
-  return Array.isArray(arrayToCheck) &&
-    arrayToCheck.length > 0 &&
-    arrayToCheck.every(isValidContextItem)
 }
 
 function isArrayOfStrings (arrayToCheck) {
   return (arrayToCheck != null) && Array.isArray(arrayToCheck) && arrayToCheck.length && arrayToCheck.every(item => { return (item && typeof item === 'string') })
 }
 
+// Además de URLs, @context admite contextos inline: el Issuer de
+// tec-credentials envía el contexto del Tec como objeto JSON-LD.
+function isValidContextArray (arrayToCheck) {
+  return Array.isArray(arrayToCheck) &&
+    arrayToCheck.length > 0 &&
+    arrayToCheck.every(item => item && (typeof item === 'string' || typeof item === 'object'))
+}
+
 function isValidVC (unSignedVC) {
   if (!unSignedVC) return false
-  const isContextPropertyValid = isValidContextArray(unSignedVC['@context'])
-  const isTypePropertyValid = isArrayOfStrings(unSignedVC.type)
-  const isIssuerPropertyValid = (unSignedVC.issuer != null) && !Array.isArray(unSignedVC.issuer) && (typeof unSignedVC.issuer === 'string' || typeof unSignedVC.issuer === 'object')
-  const isCredentialSubjectPropertyValid = (unSignedVC.credentialSubject != null) && !Array.isArray(unSignedVC.credentialSubject) && (typeof unSignedVC.credentialSubject === 'object')
-  return (isContextPropertyValid && isTypePropertyValid && isIssuerPropertyValid && isCredentialSubjectPropertyValid)
+
+  const isContextPropertyValid =
+    isValidContextArray(unSignedVC['@context'])
+
+  const isTypePropertyValid =
+    isArrayOfStrings(unSignedVC.type)
+
+  const isIssuerPropertyValid =
+    (unSignedVC.issuer != null) &&
+    !Array.isArray(unSignedVC.issuer) &&
+    (typeof unSignedVC.issuer === 'string' ||
+      typeof unSignedVC.issuer === 'object')
+
+  const isCredentialSubjectPropertyValid =
+    (unSignedVC.credentialSubject != null) &&
+    !Array.isArray(unSignedVC.credentialSubject) &&
+    (typeof unSignedVC.credentialSubject === 'object')
+
+  return (
+    isContextPropertyValid &&
+    isTypePropertyValid &&
+    isIssuerPropertyValid &&
+    isCredentialSubjectPropertyValid
+  )
 }
 
 export async function build (opts = {}) {
@@ -58,14 +83,13 @@ export async function build (opts = {}) {
   app.use(accessLogger())
   app.use(express.json())
   app.use(express.urlencoded({ extended: false }))
-  app.use(cors())
 
   app.get('/', async function (req, res, next) {
     if (enableStatusService) {
       try {
         await axios.get(`http://${statusService}/`)
       } catch (e) {
-        next({
+        return next({
           message: 'status service is NOT running.',
           error: e,
           code: 500
@@ -75,7 +99,7 @@ export async function build (opts = {}) {
     try {
       await axios.get(`http://${signingService}/`)
     } catch (e) {
-      next({
+      return next({
         message: 'signing service is NOT running.',
         error: e,
         code: 500
@@ -90,67 +114,70 @@ export async function build (opts = {}) {
   })
 
   app.get('/seedgen', async (req, res, next) => {
-    const response = await axios.get(`http://${signingService}/seedgen`)
-    return res.json(response.data)
+    try {
+      const response = await axios.get(`http://${signingService}/seedgen`)
+      return res.json(response.data)
+    } catch (error) {
+      next(error)
+    }
   })
 
   app.get('/did-key-generator', async (req, res, next) => {
-    const response = await axios.get(`http://${signingService}/did-key-generator`)
-    return res.json(response.data)
-  })
-
-  app.post('/did-web-generator', async (req, res, next) => {
-    const body = req.body
-    const response = await axios.post(`http://${signingService}/did-web-generator`, body)
-    return res.json(response.data)
+    try {
+      const response = await axios.get(`http://${signingService}/did-key-generator`)
+      return res.json(response.data)
+    } catch (error) {
+      next(error)
+    }
   })
 
   app.post('/instance/:tenantName/credentials/issue',
     async (req, res, next) => {
       try {
-        const tenantName = req.params.tenantName // the issuer instance/tenant with which to sign
+        const tenantName = findTenantName(req.params.tenantName) // the issuer instance/tenant with which to sign
         const authHeader = req.headers.authorization
-        const body = req.body
+        // Express 5 deja req.body en undefined cuando la petición no trae cuerpo.
+        const body = req.body ?? {}
         const unSignedVC = body.credential ? body.credential : body
         await verifyAuthHeader(authHeader, tenantName)
 
-if (process.env.STATUS_TRACE_ENABLED === 'true') {
-  const context = unSignedVC?.['@context']
-  const types = unSignedVC?.type
+        if (process.env.STATUS_TRACE_ENABLED === 'true') {
+          const context = unSignedVC?.['@context']
+          const types = unSignedVC?.type
 
-  const validation = {
-    contextValid: Boolean(isValidContextArray(context)),
-    typeValid: Boolean(isArrayOfStrings(types)),
-    issuerValid:
-      unSignedVC?.issuer != null &&
-      !Array.isArray(unSignedVC.issuer) &&
-      ['string', 'object'].includes(typeof unSignedVC.issuer),
-    credentialSubjectValid:
-      unSignedVC?.credentialSubject != null &&
-      !Array.isArray(unSignedVC.credentialSubject) &&
-      typeof unSignedVC.credentialSubject === 'object'
-  }
+          const validation = {
+            contextValid: Boolean(isValidContextArray(context)),
+            typeValid: Boolean(isArrayOfStrings(types)),
+            issuerValid:
+              unSignedVC?.issuer != null &&
+              !Array.isArray(unSignedVC.issuer) &&
+              ['string', 'object'].includes(typeof unSignedVC.issuer),
+            credentialSubjectValid:
+              unSignedVC?.credentialSubject != null &&
+              !Array.isArray(unSignedVC.credentialSubject) &&
+              typeof unSignedVC.credentialSubject === 'object'
+          }
 
-  console.info(JSON.stringify({
-    tag: 'TEC_COORDINATOR_VALIDATION',
-    tenantName,
-    wrappedCredential: body?.credential != null,
-    receivedProperties: Object.keys(unSignedVC ?? {}),
-    contextTypes: Array.isArray(context)
-      ? context.map(item =>
-          Array.isArray(item) ? 'array' : typeof item)
-      : null,
-    typeTypes: Array.isArray(types)
-      ? types.map(item => typeof item)
-      : null,
-    issuerType: typeof unSignedVC?.issuer,
-    credentialSubjectType: typeof unSignedVC?.credentialSubject,
-    validation,
-    failedValidations: Object.entries(validation)
-      .filter(([, valid]) => !valid)
-      .map(([name]) => name)
-  }))
-}
+          console.info(JSON.stringify({
+            tag: 'TEC_COORDINATOR_VALIDATION',
+            tenantName,
+            wrappedCredential: body?.credential != null,
+            receivedProperties: Object.keys(unSignedVC ?? {}),
+            contextTypes: Array.isArray(context)
+              ? context.map(item =>
+                  Array.isArray(item) ? 'array' : typeof item)
+              : null,
+            typeTypes: Array.isArray(types)
+              ? types.map(item => typeof item)
+              : null,
+            issuerType: typeof unSignedVC?.issuer,
+            credentialSubjectType: typeof unSignedVC?.credentialSubject,
+            validation,
+            failedValidations: Object.entries(validation)
+              .filter(([, valid]) => !valid)
+              .map(([name]) => name)
+          }))
+        }
 
         // NOTE: we throw the error here which will then be caught by middleware errorhandler
         if (!isValidVC(unSignedVC)) throw new IssuingException(422, 'A valid verifiable credential must be provided')
@@ -160,9 +187,20 @@ if (process.env.STATUS_TRACE_ENABLED === 'true') {
         const vcWithStatus = enableStatusService
           ? await callService(`http://${statusService}/credentials/status/allocate`, unSignedVC, id)
           : unSignedVC
-        if (traceEnabled()) trace('coordinator.status.allocated', id, credentialTrace(vcWithStatus))
-        const signedVC = await callService(`http://${signingService}/instance/${tenantName}/credentials/sign`, vcWithStatus, id)
-        if (traceEnabled()) trace('coordinator.credential.signed', id, credentialTrace(signedVC))
+        
+        if (enableStatusService && traceEnabled()) {
+          trace('coordinator.status.allocated', id, credentialTrace(vcWithStatus))
+        }
+
+        const signedVC = await callService(
+          getSigningEndpoint(tenantName),
+          vcWithStatus,
+          id
+        )
+
+        if (traceEnabled()) {
+          trace('coordinator.credential.signed', id, credentialTrace(signedVC))
+        }
         return res.status(201).json(signedVC)
       } catch (error) {
         // have to catch async errors and forward error handling
@@ -182,7 +220,7 @@ if (process.env.STATUS_TRACE_ENABLED === 'true') {
     async (req, res, next) => {
       if (!enableStatusService) return res.status(405).send('The status service has not been enabled.')
       try {
-        const tenantName = req.params.tenantName // the issuer instance/tenant with which to sign
+        const tenantName = findTenantName(req.params.tenantName) // the issuer instance/tenant with which to sign
         const authHeader = req.headers.authorization
         const statusUpdate = req.body
         await verifyAuthHeader(authHeader, tenantName)
@@ -190,18 +228,24 @@ if (process.env.STATUS_TRACE_ENABLED === 'true') {
         if (!statusUpdate || !Object.keys(statusUpdate).length) throw new IssuingException(400, 'A status update must be provided in the body.')
         const id = operationId(req)
         res.set('x-operation-id', id)
-        trace('coordinator.status.update.received', id, {
-          credentialId: statusUpdate.credentialId,
-          requestedStatus: statusUpdate.credentialStatus?.[0]?.status
-        })
+        
+        if(traceEnabled()){
+          trace('coordinator.status.update.received', id, {
+            credentialId: statusUpdate.credentialId,
+            requestedStatus: statusUpdate.credentialStatus?.[0]?.status
+          })
+        }
+        
         const updateResult = await callService(`http://${statusService}/credentials/status`, statusUpdate, id)
-        trace('coordinator.status.update.completed', id, { status: updateResult?.code })
+        if(traceEnabled()){        
+          trace('coordinator.status.update.completed', id, { status: updateResult?.code })
+        }
         return res.json(updateResult)
       } catch (error) {
         if (error.response?.status === 404) {
           // if it is a 404 then just forward on the error
           // we got from the service
-          next(error.response.data)
+          return next(error.response.data)
         }
         // otherwise, forward the error to middleware:
         next(error)
@@ -209,19 +253,21 @@ if (process.env.STATUS_TRACE_ENABLED === 'true') {
     })
 
   app.get('/status/:statusCredentialId', async function (req, res, next) {
-    if (!enableStatusService) next({ code: 405, message: 'The status service has not been enabled.' })
+    if (!enableStatusService) return next({ code: 405, message: 'The status service has not been enabled.' })
     const statusCredentialId = req.params.statusCredentialId
+    // Los ids de lista son alfanuméricos; cualquier otro valor no existe.
+    if (!STATUS_CREDENTIAL_ID.test(statusCredentialId)) {
+      return next({ code: 404, message: 'No status credential found for that id.' })
+    }
     try {
-      const { data: statusCredential } = await axios.get(`http://${statusService}/${statusCredentialId}`)
+      const { data: statusCredential } = await axios.get(`http://${statusService}/${encodeURIComponent(statusCredentialId)}`)
       return res.status(200).json(statusCredential)
     } catch (error) {
-      if (error.response.status === 404) {
-        next({ code: 404, message: 'No status credential found for that id.' })
-      } else {
-        next(error)
+      if (error.response?.status === 404) {
+        return next({ code: 404, message: 'No status credential found for that id.' })
       }
+      next(error)
     }
-    return res.status(500).send({ message: 'Server error.' })
   })
 
   // Attach the error handling middleware calls, in order they should run
