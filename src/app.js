@@ -7,6 +7,7 @@ import errorLogger from './middleware/errorLogger.js'
 import invalidPathHandler from './middleware/invalidPathHandler.js'
 import verifyAuthHeader from './verifyAuthHeader.js'
 import { getConfig } from './config.js'
+import { operationId, trace, credentialTrace, traceEnabled } from './utils/statusTrace.js'
 
 class IssuingException extends Error {
   constructor (code, message, error = null) {
@@ -17,9 +18,19 @@ class IssuingException extends Error {
   }
 }
 
-async function callService (endpoint, body) {
-  const { data } = await axios.post(endpoint, body)
+async function callService (endpoint, body, id) {
+  const { data } = await axios.post(endpoint, body, { headers: { 'x-operation-id': id } })
   return data
+}
+
+function isValidContextItem (item) {
+  return item && (typeof item === 'string' || typeof item === 'object')
+}
+
+function isValidContextArray (arrayToCheck) {
+  return Array.isArray(arrayToCheck) &&
+    arrayToCheck.length > 0 &&
+    arrayToCheck.every(isValidContextItem)
 }
 
 function isArrayOfStrings (arrayToCheck) {
@@ -28,7 +39,7 @@ function isArrayOfStrings (arrayToCheck) {
 
 function isValidVC (unSignedVC) {
   if (!unSignedVC) return false
-  const isContextPropertyValid = isArrayOfStrings(unSignedVC['@context'])
+  const isContextPropertyValid = isValidContextArray(unSignedVC['@context'])
   const isTypePropertyValid = isArrayOfStrings(unSignedVC.type)
   const isIssuerPropertyValid = (unSignedVC.issuer != null) && !Array.isArray(unSignedVC.issuer) && (typeof unSignedVC.issuer === 'string' || typeof unSignedVC.issuer === 'object')
   const isCredentialSubjectPropertyValid = (unSignedVC.credentialSubject != null) && !Array.isArray(unSignedVC.credentialSubject) && (typeof unSignedVC.credentialSubject === 'object')
@@ -102,12 +113,56 @@ export async function build (opts = {}) {
         const body = req.body
         const unSignedVC = body.credential ? body.credential : body
         await verifyAuthHeader(authHeader, tenantName)
+
+if (process.env.STATUS_TRACE_ENABLED === 'true') {
+  const context = unSignedVC?.['@context']
+  const types = unSignedVC?.type
+
+  const validation = {
+    contextValid: Boolean(isValidContextArray(context)),
+    typeValid: Boolean(isArrayOfStrings(types)),
+    issuerValid:
+      unSignedVC?.issuer != null &&
+      !Array.isArray(unSignedVC.issuer) &&
+      ['string', 'object'].includes(typeof unSignedVC.issuer),
+    credentialSubjectValid:
+      unSignedVC?.credentialSubject != null &&
+      !Array.isArray(unSignedVC.credentialSubject) &&
+      typeof unSignedVC.credentialSubject === 'object'
+  }
+
+  console.info(JSON.stringify({
+    tag: 'TEC_COORDINATOR_VALIDATION',
+    tenantName,
+    wrappedCredential: body?.credential != null,
+    receivedProperties: Object.keys(unSignedVC ?? {}),
+    contextTypes: Array.isArray(context)
+      ? context.map(item =>
+          Array.isArray(item) ? 'array' : typeof item)
+      : null,
+    typeTypes: Array.isArray(types)
+      ? types.map(item => typeof item)
+      : null,
+    issuerType: typeof unSignedVC?.issuer,
+    credentialSubjectType: typeof unSignedVC?.credentialSubject,
+    validation,
+    failedValidations: Object.entries(validation)
+      .filter(([, valid]) => !valid)
+      .map(([name]) => name)
+  }))
+}
+
         // NOTE: we throw the error here which will then be caught by middleware errorhandler
         if (!isValidVC(unSignedVC)) throw new IssuingException(422, 'A valid verifiable credential must be provided')
+        const id = operationId(req)
+        res.set('x-operation-id', id)
+        if (traceEnabled()) trace('coordinator.issue.received', id, credentialTrace(unSignedVC))
         const vcWithStatus = enableStatusService
-          ? await callService(`http://${statusService}/credentials/status/allocate`, unSignedVC)
+          ? await callService(`http://${statusService}/credentials/status/allocate`, unSignedVC, id)
           : unSignedVC
-        const signedVC = await callService(`http://${signingService}/instance/${tenantName}/credentials/sign`, vcWithStatus)
+        if (traceEnabled()) trace('coordinator.status.allocated', id, credentialTrace(vcWithStatus))
+        const signedVC = await callService(`http://${signingService}/instance/${tenantName}/credentials/sign`, vcWithStatus, id)
+        if (traceEnabled()) trace('coordinator.credential.signed', id, credentialTrace(signedVC))
         return res.status(201).json(signedVC)
       } catch (error) {
         // have to catch async errors and forward error handling
@@ -133,7 +188,14 @@ export async function build (opts = {}) {
         await verifyAuthHeader(authHeader, tenantName)
         // NOTE: we throw the error here which will then be caught by middleware errorhandler
         if (!statusUpdate || !Object.keys(statusUpdate).length) throw new IssuingException(400, 'A status update must be provided in the body.')
-        const updateResult = await callService(`http://${statusService}/credentials/status`, statusUpdate)
+        const id = operationId(req)
+        res.set('x-operation-id', id)
+        trace('coordinator.status.update.received', id, {
+          credentialId: statusUpdate.credentialId,
+          requestedStatus: statusUpdate.credentialStatus?.[0]?.status
+        })
+        const updateResult = await callService(`http://${statusService}/credentials/status`, statusUpdate, id)
+        trace('coordinator.status.update.completed', id, { status: updateResult?.code })
         return res.json(updateResult)
       } catch (error) {
         if (error.response?.status === 404) {
